@@ -1,2 +1,4 @@
-test.txt
+test*.txt
 test.ps1
+*.log
+*.html
