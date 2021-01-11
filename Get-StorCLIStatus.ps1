@@ -2904,10 +2904,10 @@ function New-ErrorRecord
 
     .NOTES
         Author.: Kenneth Nielsen (sharzas @ GitHub.com)
-        Version: 1.1
+        Version: 1.2
 
     .LINK
-        https://github.com/sharzas/Powershell-Get-StorCLIStatus
+        https://github.com/sharzas/Powershell-New-ErrorRecord
     #>
 
     [CmdletBinding()]
