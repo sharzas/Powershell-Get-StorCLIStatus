@@ -75,18 +75,13 @@
     Path of text file containing output from StorCLI. 
     
     -StorCLIOutput and -Path is mutually exclusive
+    
+.PARAMETER PruneDataLogDate
+    If specified, the data log will be pruned.
 
-.PARAMETER PruneDataLog
-    If specified, the data log will be pruned according to -PruneDataLogBefore.
+    All entries dated earlier than this date will be removed from the log.
     
-    All entries dated earlier than the date specified in -PruneDataLogBefore,
-    will be removed from the log.
-    
-.PARAMETER PruneDataLogBefore
-    Specifies the cutover date used for pruning the data log. See -PruneDataLog
-    for more information.
-    
-    If this parameter is not specified, the default is 365 days in the past.
+    If this parameter is not specified, the log will not be pruned.
 
 .PARAMETER PruneStatusLogDate
     If specified, the status log will be pruned.
@@ -431,7 +426,7 @@
       - Authenticate as myemail@mydomain.com:Passw0rd
 
 .EXAMPLE
-    .\Get-StorCLIStatus.ps1 -Path Storcli.txt -CheckStatus -ConvertFromUTCTime -SendMailOnError -SendMailAsText -SMTPHost "smtp.myhost.com" -SMTPPort 25 -From @{"bofh@mydomain.com" = "BOFH: BestServer01 - Status Notifier"} -Recipient "myemail@mydomain.com" -Username "myemail@mydomain.com" -Password "Passw0rd123" -ReportHostname "BestServer01" -DataLogFile "StorCLI_data.log" -StatusLogFile "StorCLI_status.log" -PruneDataLog -PruneStatusLogDate (Get-Date).AddDays(-730) -LogStatusReportOnError
+    .\Get-StorCLIStatus.ps1 -Path Storcli.txt -CheckStatus -ConvertFromUTCTime -SendMailOnError -SendMailAsText -SMTPHost "smtp.myhost.com" -SMTPPort 25 -From @{"bofh@mydomain.com" = "BOFH: BestServer01 - Status Notifier"} -Recipient "myemail@mydomain.com" -Username "myemail@mydomain.com" -Password "Passw0rd123" -ReportHostname "BestServer01" -DataLogFile "StorCLI_data.log" -StatusLogFile "StorCLI_status.log" -PruneDataLogDate (Get-Date).AddDays(-365) -PruneStatusLogDate (Get-Date).AddDays(-730) -LogStatusReportOnError
 
     - Check status of the raid controller, based on contents in Storcli.txt
     - Use the hostname BestServer01 for the report.
@@ -446,7 +441,7 @@
     - Log dataset to file "StorCLI_data.log"
     - Log Error report to status file if the controller is in error state
     - Prune status log for any lines older than 730 days.
-    - Prune data log for any lines older than 365 days. (default)
+    - Prune data log for any lines older than 365 days.
 
 .OUTPUTS
     A Powershell custom object, containing all or part of:
@@ -506,10 +501,7 @@ Param (
     $Password = $null,
 
     [Parameter()]
-    [switch]$PruneDataLog = $false,
-
-    [Parameter()]
-    [DateTime]$PruneDataLogBefore,
+    [DateTime]$PruneDataLogDate = $null,
 
     [Parameter()]
     [DateTime]$PruneStatusLogDate = $null,
@@ -2450,10 +2442,7 @@ function Invoke-Main
         $Password = $null,
     
         [Parameter()]
-        [switch]$PruneDataLog = $false,
-    
-        [Parameter()]
-        [DateTime]$PruneDataLogBefore,
+        [DateTime]$PruneDataLogDate = $null,
 
         [Parameter()]
         [DateTime]$PruneStatusLogDate = $null,
@@ -2509,7 +2498,7 @@ function Invoke-Main
         # build parameter set to pass on to Update-DataLog function
         $Params = @{"NewData" = $StorCLI}
 
-        @("DataLogFile", "PruneDataLog", "PruneDataLogBefore")|ForEach-Object {
+        @("DataLogFile", "PruneDataLogDate")|ForEach-Object {
             if ($PSBoundParameters.ContainsKey($_)) {
                 Write-Verbose ('Invoke-Main(): Build parameters for Update-DataLog: {0} = {1}' -f $_, $PSBoundParameters[$_])
                 $Params[$_] = $PSBoundParameters[$_]
@@ -4380,18 +4369,13 @@ function Update-DataLog
     .PARAMETER NewData
         The data to add to the log. This must either be a string, or an array of
         strings.
-                
-    .PARAMETER PruneDataLog
-        If specified, the data log will be pruned according to -PruneDataLogBefore.
         
-        All entries dated earlier than the date specified in -PruneDataLogBefore,
-        will be removed from the log.
+    .PARAMETER PruneDataLogDate
+        If specified, the data log will be pruned.
+
+        All entries dated earlier than this date will be removed from the log.
         
-    .PARAMETER PruneDataLogBefore
-        Specifies the cutover date used for pruning the data log. See -PruneDataLog
-        for more information.
-        
-        If this parameter is not specified, the default is 365 days in the past.
+        If this parameter is not specified, the log will not be pruned.
 
     .OUTPUTS
         Success = nothing.
@@ -4417,10 +4401,7 @@ function Update-DataLog
         $DataLogFile = $null,
 
         [Parameter()]
-        [switch]$PruneDataLog = $false,
-
-        [Parameter()]
-        [DateTime]$PruneDataLogBefore = (Get-Date).AddDays(-365),
+        [DateTime]$PruneDataLogDate = $null,
 
         [Parameter()]
         $NewData
@@ -4469,14 +4450,14 @@ function Update-DataLog
         # Get current entry count.
         $Entries = $Data.Count
 
-        if ($PruneDataLog) {
-            # we should prune the datalog, for entries older than the date specified in -PruneDataLogBefore
-            Write-Verbose ('Update-DataLog(): Pruning DataLog for entries dated earlier than {0}' -f $PruneDataLogBefore)
+        if ($null -ne $PruneDataLogDate) {
+            # we should prune the datalog, for entries older than the date specified in -PruneDataLogDate
+            Write-Verbose ('Update-DataLog(): Pruning DataLog for entries dated earlier than {0}' -f $PruneDataLogDate)
 
             if ($null -ne $Data.Basics.'Current System Date/time') {
                 # we have a date present in the datalog we can use to determine which entries to remove
 
-                $Data = @($Data|Where-Object {$_.Basics.'Current System Date/time' -gt $PruneDataLogBefore})
+                $Data = @($Data|Where-Object {$_.Basics.'Current System Date/time' -gt $PruneDataLogDate})
 
                 Write-Verbose ('Update-DataLog(): Succesfully pruned {0} entries from DataLogFile' -f ($Entries - $Data.Count))
             } else {
@@ -4507,203 +4488,6 @@ function Update-DataLog
 } # function Update-DataLog
 
 
-
-
-
-
-
-function Update-StatusLog
-{
-    <#
-    .SYNOPSIS
-        Update the statuslog per specified parameters.
-        
-    .DESCRIPTION
-        Update the statuslog per specified parameters.
-        
-        No update will happen unless parameters specify it.
-
-        NOTE:
-        This is an internal helper function. It should only be called from
-        Invoke-Main
-
-    .PARAMETER Prefix
-        If specified, all logged lines will be prefixed with this value. The prefix
-        is inserted between the log line and the timestamp - like this:
-
-        <timestamp> <prefix> <logline>
-
-    .PARAMETER NewData
-        The data to add to the log. This must either be a string, or an array of
-        strings.
-                
-    .PARAMETER PruneStatusLog
-        If specified, the status log will be pruned according to -PruneStatusLogBefore.
-        
-        All entries dated earlier than the date specified in -PruneStatusLogBefore,
-        will be removed from the log.
-
-    .PARAMETER PruneStatusLogBefore
-        Specifies the cutover date used for pruning the status log. See -PruneStatusLog
-        for more information.
-        
-        If this parameter is not specified, the default is 365 days in the past.
-            
-    .PARAMETER StatusLogFile
-        If specified, status will be logged in text form to this file.
-        
-        More or less data may be included, based on the other parameters specified.
-
-        See -LogFullStatusReport and -LogStatusReportOnError
-
-        Pruning options are available for this log, to prevent it growing uncontrollably
-
-        NOTE: This is not the same as the -DataLogFile!
-
-    .PARAMETER TimeStampFormat
-        This is the DateTime format used by the logging functions. This must be a .NET
-        supported TimeProvider format.
-        
-        IMPORTANT:
-        If you change the format using -TimeStampFormat, and you are using any of the
-        log pruning options, be aware that your entire log most likely will be pruned
-        at first run, or the script may encounter an error.
-
-        It is advisable to backup any logs in need of preservation first, and delete
-        log files when changing this format!
-
-    .OUTPUTS
-        Success = nothing.
-        Failure = Terminating Exception.
-
-    .NOTES
-        Author.: Kenneth Nielsen (sharzas @ GitHub.com)
-        Version: 1.0
-
-        NOTE:
-        This is an internal helper function. It should only be called from
-        Invoke-Main
-
-    .LINK
-        https://github.com/sharzas/Powershell-Get-StorCLIStatus
-    #>
-
-    [CmdletBinding()]
-
-    Param (
-        [Parameter()]
-        [string]$Prefix = "",
-
-        [Parameter()]
-        [switch]$PruneStatusLog = $false,
-
-        [Parameter()]
-        [DateTime]$PruneStatusLogBefore = (Get-Date).AddDays(-365),
-
-        [Parameter()]
-        $StatusLogFile = $null,
-
-        [Parameter()]
-        [string]$TimeStampFormat = "dd-MM-yyyy HH:mm:ss",
-
-        [Parameter()]
-        $NewData
-    )
-
-    Write-Verbose ('Update-StatusLog(): Invoked.')
-
-    $PSBoundParameters.Keys|ForEach-Object {Write-Verbose ('Update-StatusLog(): Parameter supplied to function: {0}' -f $_)}
-
-    if ($null -ne $StatusLogFile) {
-        # declare data storage array
-        $Data = @()
-
-        if ((Test-Path -Path $StatusLogFile -PathType Leaf)) {
-            Write-Verbose ('Update-StatusLog(): StatusLogFile found - it will be updated: {0}' -f $StatusLogfile)
-
-            if ($PruneStatusLog) {
-                #
-                # only load contents of file if Prune is specified - otherwise its a waste of time and resources!
-                #
-                try {
-                    $Data = @(Get-Content $StatusLogFile)
-        
-                    Write-Verbose ('Update-StatusLog(): Succesfully loaded {0} lines from StatusLogFile {1}' -f $Data.Count, $StatusLogFile)
-                } catch {
-                    Write-Warning ('Update-StatusLog(): Failed to load existing StatusLogFile {0}' -f $StatusLogFile)
-                    Write-Warning ('Update-StatusLog(): ')
-                    Write-Warning ('Update-StatusLog(): Status will not be logged.')
-                    Write-Warning ('Update-StatusLog(): ')
-
-                    $PSCmdlet.ThrowTerminatingError((New-ErrorRecord -baseObject $_ `
-                        -exceptionMessage ('Error trying to load StatusLogFile "{0}" - 0x{1:X} - {2}' -f $StatusLogFile, $_.Exception.HResult, $_.Exception.Message) `
-                        -errorId "Update-StatusLog" -errorCategory "ReadError" -targetObject $StatusLogFile))
-                }
-            }
-        } else {
-            Write-Verbose ('Update-StatusLog(): StatusLogFile not found - new will be created: {0}' -f $StatusLogfile)
-        }
-
-
-
-        if ($PruneStatusLog) {
-            # we should prune the statuslog, for entries older than the date specified in -PruneStatusLogBefore
-            Write-Verbose ('Update-StatusLog(): Pruning StatusLog for entries dated earlier than {0}' -f $PruneStatusLogBefore)
-    
-            # Get current entry count.
-            $Entries = $Data.Count
-            
-            # build RegExp pattern to use for splitting the text in the log file, so we can separate
-            # the timestamp, in order to correctly prune the log.
-            #$Pattern = "(^$($TimeStampFormat.ToLower().Replace("d","0").Replace("m","0").Replace("y","0").Replace("h","0").Replace("s","0").Replace("0","\d").Replace(".","\.").Replace("*","\*").Replace("+","\+").Replace('$','\$').Replace("[", "\[").Replace("]","\]").Replace("^","\^")))"
-            $Pattern = "(^$((($TimeStampFormat -replace 'h|m|s|d|y','0') -replace '(\*|\+|\.|\[|\]|\^|\$|\\)','\$1') -replace '0','\d'))"
-            
-            # we need a variable of type DateTime to reference for the TryParse function.
-            [DateTime]$DateRef = Get-Date
-
-            # remove all lines with a timestamp older than the Prune date.
-            $Data = @(($Data|Select-String $Pattern| `
-                Where-Object {[DateTime]::TryParse($_.Matches[0].Groups[1].Value, [ref]$DateRef)}| `
-                Where-Object {[DateTime]::Parse($_.Matches[0].Groups[1].Value) -gt $PruneStatusLogBefore} `
-            )|Select-Object -ExpandProperty Line)  # important to grab the line property, or powershell will truncate lines!!!
-
-            Write-Verbose ('Update-StatusLog(): Succesfully pruned {0} entries from StatusLogFile' -f ($Entries - $Data.Count))
-        }
-
-
-        if ($null -ne $NewData) {
-            # New data to add to the log file is specified.
-            Write-Verbose ('Update-StatusLog(): Adding new log data to status log.')
-
-            # add everything to the current dataset, and timestamp it first.
-            $NewData|ForEach-Object {
-                $Data += ('{0} {1}{2}' -f (Get-Date -Format $TimeStampFormat), $Prefix, $_)
-            }
-        }
-
-
-        try {
-            if ($PruneStatusLog) {
-                # Prune specified, so overwrite file with entire contents of existing file, except
-                # the pruned log lines.
-                $Data|Set-Content -Path $StatusLogFile -Encoding UTF8
-            } else {
-                # Prune wasn't specified, so just append the data or create new file.
-                $Data|Add-Content -Path $StatusLogFile -Encoding UTF8
-            }
-
-            Write-Verbose ('Update-StatusLog(): Succesfully written {0} lines to StatusLogFile {1}' -f $Data.Count, $StatusLogFile)
-        } catch {
-            $PSCmdlet.ThrowTerminatingError((New-ErrorRecord -baseObject $_ `
-                -exceptionMessage ('Error trying to write to StatusLogFile "{0}" - 0x{1:X} - {2}' -f $StatusLogFile, $_.Exception.HResult, $_.Exception.Message) `
-                -errorId "Update-StatusLog" -errorCategory "WriteError" -targetObject $StatusLogFile))
-        }
-    } else {
-        # -StatusLog not specified, so we'll do nothing.
-        Write-Verbose ('Update-StatusLog(): -StatusLog not specified, no action taken.')
-    }
-
-} # function Update-StatusLog
 
 
 
