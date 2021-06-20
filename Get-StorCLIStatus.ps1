@@ -37,7 +37,8 @@
 
 .PARAMETER DataLogFile
     If specified, Data will be logged in xml form to this file, using
-    Export-CliXML.
+    Export-CliXML. (This has been modified to a custom function version, due to issues
+    with Export-CliXML and large logs).
     
     The purpose of this, is to have a complete dataset for further investigation
     at a later date, and to be able to establish a technical history, if needed.
@@ -459,7 +460,40 @@
 
 .NOTES
     Author.: Kenneth Nielsen (sharzas @ GitHub.com)
-    Version: 1.0
+    Version: 1.1
+
+    Version History:
+
+    1.1
+    ===
+    - Bugfix:
+      When the datalog grew large (300mb+) Export-CliXML failed to correctly export
+      deserialized data, and the result was a non-closed XML file, which failed to
+      import with Import-CliXML.
+
+      2 things has been done to attempt to remedy this issue:
+
+      1. The raw StorCLI Output text file, is now read into pure .NET string objects,
+         instead of the default Get-Content PSObject decorated ones - stripping 6
+         PowerShell added properties. This reduces the size of the deserialized data
+         by a great deal 60%+ depending on the size of the StorCLI output.
+
+      2. Custom functions has been implemented to handle the (de)serialization of
+         object data. These are hopefully more robust, albeit a little more memory
+         intensive.
+
+      NOTE: If you still get this issue, beware that the data log functionality
+            is memory intensive! 4-6 GB is not unseen. This is not likely to change,
+            as its a feature implemented to satisfy a personal need.
+            
+
+    - Added functionality:
+      Extra output to Status log - begin/end times for script + status log pruning,
+      to track the execution time, as I suspected that was an issue.
+
+    1.0
+    ===
+    First version
 
 .LINK
     https://github.com/sharzas/Powershell-Get-StorCLIStatus
@@ -501,10 +535,10 @@ Param (
     $Password = $null,
 
     [Parameter()]
-    [DateTime]$PruneDataLogDate = $null,
+    [DateTime]$PruneDataLogDate,
 
     [Parameter()]
-    [DateTime]$PruneStatusLogDate = $null,
+    [DateTime]$PruneStatusLogDate,
 
     [Parameter(ParameterSetName = 'CheckStatus')]
     $Recipient,
@@ -540,6 +574,236 @@ Param (
     [string]$Username = ""
 
 )
+
+
+
+
+
+
+
+
+
+
+
+<#
+    .SYNOPSIS
+        Converts Clixml to an object.
+    
+    .DESCRIPTION
+        Converts Clixml to an object.
+    
+    .PARAMETER String
+        Clixml as a string object.
+    
+    .EXAMPLE
+        $xml = @"
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+<S>ThisIsMyString</S>
+</Objs>
+"@
+        ConvertFrom-Clixml -String $xml
+
+        ThisIsMyString
+    
+    .EXAMPLE
+        $xml = @"
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+<S>ThisIsMyString</S>
+</Objs>
+"@
+        $xml | ConvertFrom-Clixml
+
+        ThisIsMyString
+    
+    .EXAMPLE
+        $xml = @"
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+<S>ThisIsMyString</S>
+</Objs>
+"@
+        $xml2 = @"
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+<S>This is another string</S>
+</Objs>
+"@
+        ConvertFrom-Clixml -String $xml,$xml2
+
+        ThisIsMyString
+        This is another string
+        
+    .EXAMPLE
+        $xml = @"
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+<S>ThisIsMyString</S>
+</Objs>
+"@
+        $xml2 = @"
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+<S>This is another string</S>
+</Objs>
+"@
+        $xml,$xml2 | ConvertFrom-Clixml
+
+        ThisIsMyString
+        This is another string
+
+    .OUTPUTS
+        [Object[]]
+
+    .LINK
+        http://convert.readthedocs.io/en/latest/functions/ConvertFrom-Clixml/
+#>
+function ConvertFrom-Clixml
+{
+    [CmdletBinding(HelpUri = 'http://convert.readthedocs.io/en/latest/functions/ConvertFrom-Clixml/')]
+    param
+    (
+        [Parameter(
+            Mandatory = $true,
+            ValueFromPipeline = $true,
+            ValueFromPipelineByPropertyName = $true)]
+        [ValidateNotNullOrEmpty()]
+        [String[]]
+        $String
+    )
+
+    begin
+    {
+        $userErrorActionPreference = $ErrorActionPreference
+        Set-Variable -Name 'SPLIT' -Value '(?<!^)(?=<Objs)' -Option 'Constant'
+    }
+    
+    process
+    {
+        foreach ($s in $String)
+        {
+            try
+            {
+                foreach ($record in ($s -split $SPLIT))
+                {
+                    [System.Management.Automation.PSSerializer]::Deserialize($record)
+                }
+            }
+            catch
+            {
+                Write-Error -ErrorRecord $_ -ErrorAction $userErrorActionPreference
+            }
+        }
+    }
+} # function ConvertFrom-Clixml
+
+
+
+
+
+
+
+<#
+    .SYNOPSIS
+        Converts an object to Clixml.
+
+    .DESCRIPTION
+        Converts an object to Clixml.
+
+    .PARAMETER InputObject
+        The input object to serialize
+
+    .PARAMETER Depth
+        The depth of the members to serialize
+
+    .EXAMPLE
+        $string = 'A string'
+        ConvertTo-Clixml -InputObject $string
+
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <S>A string</S>
+</Objs>
+
+    .EXAMPLE
+        $string = 'A string'
+        $string | ConvertTo-Clixml
+
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <S>A string</S>
+</Objs>
+
+    .EXAMPLE
+        $string1 = 'A string'
+        $string2 = 'Another string'
+        ConvertTo-Clixml -InputObject $string1,$string2
+
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <S>A string</S>
+</Objs>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <S>Another string</S>
+</Objs>
+
+    .EXAMPLE
+        $string1 = 'A string'
+        $string2 = 'Another string'
+        $string1,$string2 | ConvertTo-Clixml
+
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <S>A string</S>
+</Objs>
+<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">
+  <S>Another string</S>
+</Objs>
+
+    .OUTPUTS
+        [String[]]
+
+    .LINK
+        http://convert.readthedocs.io/en/latest/functions/ConvertTo-Clixml/
+#>
+function ConvertTo-Clixml
+{
+    [CmdletBinding(HelpUri = 'http://convert.readthedocs.io/en/latest/functions/ConvertTo-Clixml/')]
+    param
+    (
+        [Parameter(
+            Mandatory = $true,
+            ValueFromPipeline = $true,
+            ValueFromPipelineByPropertyName = $true)]
+        [ValidateNotNullOrEmpty()]
+        [PSObject]
+        $InputObject,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateRange(1, [Int32]::MaxValue)]
+        [Int32]
+        $Depth = 1
+    )
+
+    begin
+    {
+        $userErrorActionPreference = $ErrorActionPreference
+    }
+
+    process
+    {
+        try
+        {
+            [System.Management.Automation.PSSerializer]::Serialize($InputObject, $Depth)
+        }
+        catch
+        {
+            Write-Error -ErrorRecord $_ -ErrorAction $userErrorActionPreference
+        }
+    }
+} # function ConvertTo-Clixml
+
+
+
+
+
+
+
+
+
+
+
 
 
 function ConvertFrom-StorCLIOutput
@@ -1814,7 +2078,11 @@ function ConvertFrom-StorCLIOutput
 
         try {
             Write-Verbose ('ConvertFrom-StorCLIOutput(): Attempting to read file specified in -Path: "{0}"' -f $Path)
-            $StorCLIOutput = Get-Content -Path $Path -ErrorAction Stop
+
+            # We will pass each array element through a foreach loop as [string] types, to get a vanilla .NET string
+            # object, without the decorated properties of Get-Content (PSDrive, PSPath, etc)... it saves a lot of
+            # space, when we deserialize the object for logging purposes!
+            $StorCLIOutput = Get-Content -Path $Path -ErrorAction Stop|ForEach-Object {[string]$_}
         } catch {
             Write-Verbose ('ConvertFrom-StorCLIOutput(): Failed to read file specified in -Path: "{0}"' -f $Path)
             $PSCmdlet.ThrowTerminatingError((New-ErrorRecord -baseObject $_))
@@ -2442,10 +2710,10 @@ function Invoke-Main
         $Password = $null,
     
         [Parameter()]
-        [DateTime]$PruneDataLogDate = $null,
+        [DateTime]$PruneDataLogDate,
 
         [Parameter()]
-        [DateTime]$PruneStatusLogDate = $null,
+        [DateTime]$PruneStatusLogDate,
 
         [Parameter()]
         $Recipient,
@@ -2480,6 +2748,11 @@ function Invoke-Main
 
     Write-Verbose "Invoke-Main(): Invoked."
 
+    if ($null -ne $StatusLogFile) {
+        "Script started"|Out-Log -Prefix "[BEGIN] " -LogFile $StatusLogFile
+    }
+
+
     $PSBoundParameters.Keys|ForEach-Object {Write-Verbose ('Invoke-Main(): Parameter supplied to function: {0} - Type = "{1}"' -f $_, $_.Gettype().Fullname)}
 
     # build parameter set to pass on to ConvertFrom-StorCLIOutput function
@@ -2493,6 +2766,18 @@ function Invoke-Main
     }
     
     $StorCLI = ConvertFrom-StorCLIOutput @Params
+
+    if ($null -eq $StorCLI) {
+        Write-Warning "Invoke-Main(): Could not retrieve the StorCLI object!"
+        Write-Warning ""
+        Write-Warning "Parameters issued to ConvertFrom-StorCLIOutput:"
+        Write-Warning "================================================"
+        $Params.GetEnumerator()|Format-Table -AutoSize|Out-String -Stream|Write-Warning
+        Write-Warning ""
+        Write-Warning "Aborting!"
+        return $null
+    }
+
 
     if ($null -ne $StorCLI) {
         # build parameter set to pass on to Update-DataLog function
@@ -2596,29 +2881,25 @@ function Invoke-Main
     # Lets generate a status if its needed - part 2 - finish up and write to log.
     if ($null -ne $StatusLogFile) {
         # build parameter set to pass on to Update-StatusLog function
-        $Params = @{"NewData" = $Log; "Prefix" = $Prefix}
+        $Params = @{"LogFile" = $StatusLogFile}
+
+        if ($PSBoundParameters.ContainsKey("PruneStatusLogDate")) {
+            $Params["PruneLogDate"] = $PruneStatusLogDate
+        }
 
         try {
             $Log|Out-Log -Prefix $Prefix -LogFile $StatusLogFile
-            Update-Log -LogFile $StatusLogFile -PruneLogDate $PruneStatusLogDate
+
+            "Begin log pruning"|Out-Log -Prefix "[LOG] " -LogFile $StatusLogFile
+            Update-Log @Params
+            "Completed log pruning"|Out-Log -Prefix "[LOG] " -LogFile $StatusLogFile
+
             Write-Verbose ('Invoke-Main(): StatusLog updated succesfully.')
         } catch {
             Write-Warning ('Invoke-Main(): Error attempting to update StatusLog.')
             Throw
         }        
     }
-
-    if ($null -eq $StorCLI) {
-        Write-Warning "Invoke-Main(): Could not retrieve the StorCLI object!"
-        Write-Warning ""
-        Write-Warning "Parameters issued to ConvertFrom-StorCLIOutput:"
-        Write-Warning "================================================"
-        $Params.GetEnumerator()|Format-Table -AutoSize|Out-String -Stream|Write-Warning
-        Write-Warning ""
-        Write-Warning "Aborting!"
-        return $null
-    }
-
 
 
     if ($CheckStatus) {
@@ -2627,15 +2908,30 @@ function Invoke-Main
         if ($Status.Status -ne "OK") {
             Write-Warning ('Performed status check on StorCLI output. State is "{0}"' -f $Status.Status)
             $Status.AdditionalInformation|Foreach-Object {Write-Warning $_}
+
+            if ($null -ne $StatusLogFile) {
+                "-CheckStatus specified: Exit with exit code 1"|Out-Log -Prefix "[END] " -LogFile $StatusLogFile
+            }
+
             Exit 1
         } else {
             Write-Host ('Performed status check on StorCLI output. State is "{0}"' -f $Status.Status)
             $Status.AdditionalInformation|Foreach-Object {Write-Host $_}
+
+            if ($null -ne $StatusLogFile) {
+                "-CheckStatus specified: Exit with exit code 0"|Out-Log -Prefix "[END] " -LogFile $StatusLogFile
+            }
+
             Exit 0
         }
     } else {
         Write-Verbose ('Invoke-Main(): Done - returning object with {0} properties.' -f ($StorCLI|Get-Member -MemberType Properties).Count)
-        return $StorCLI
+
+        if ($null -ne $StatusLogFile) {
+            "-CheckStatus NOT specified: Returning StorCLI object"|Out-Log -Prefix "[END] " -LogFile $StatusLogFile
+        }
+
+    return $StorCLI
     }
 } # function Invoke-Main
 
@@ -3454,7 +3750,7 @@ function Update-Log
         $LogFile = $null,
 
         [Parameter()]
-        [DateTime]$PruneLogDate = $null,
+        [DateTime]$PruneLogDate,
 
         [Parameter()]
         [string]$TimeStampFormat = "dd-MM-yyyy HH:mm:ss"
@@ -3478,7 +3774,7 @@ function Update-Log
     if ((Test-Path -Path $LogFile -PathType Leaf)) {
         Write-Verbose ('Update-Log(): LogFile found: {0}' -f $Logfile)
 
-        if ($PSBoundParameters.ContainsKey("PruneLogDate") -or ($null -ne $PruneLogDate)) {
+        if ($PSBoundParameters.ContainsKey("PruneLogDate")) {
             #
             # We should prune the log.
             #
@@ -4362,7 +4658,8 @@ function Update-DataLog
 
     .PARAMETER DataLogFile
         If specified, Data will be logged in xml form to this file, using
-        Export-CliXML.
+        Export-CliXML. (This has been modified to a custom function version, due to issues
+        with Export-CliXML and large logs).
         
         Pruning options are available for this log, to prevent it growing uncontrollably
 
@@ -4401,7 +4698,7 @@ function Update-DataLog
         $DataLogFile = $null,
 
         [Parameter()]
-        [DateTime]$PruneDataLogDate = $null,
+        [DateTime]$PruneDataLogDate,
 
         [Parameter()]
         $NewData
@@ -4417,7 +4714,8 @@ function Update-DataLog
             Write-Verbose ('Update-DataLog(): DataLogFile found - it will be updated: {0}' -f $DataLogfile)            
 
             try {
-                $Data = @(Import-Clixml -Path $DataLogFile)
+                #$Data = @(Import-Clixml -Path $DataLogFile)
+                $Data = [System.IO.File]::ReadAllText($DataLogFile, [System.Text.Encoding]::UTF8)|ConvertFrom-Clixml
     
                 Write-Verbose ('Update-DataLog(): Succesfully imported {0} entries from DataLogFile {1}' -f $Data.Count, $DataLogFile)
             } catch {
@@ -4450,7 +4748,7 @@ function Update-DataLog
         # Get current entry count.
         $Entries = $Data.Count
 
-        if ($null -ne $PruneDataLogDate) {
+        if ($PSBoundParameters.ContainsKey("$PruneDataLogDate")) {
             # we should prune the datalog, for entries older than the date specified in -PruneDataLogDate
             Write-Verbose ('Update-DataLog(): Pruning DataLog for entries dated earlier than {0}' -f $PruneDataLogDate)
 
@@ -4473,7 +4771,8 @@ function Update-DataLog
         }
 
         try {
-            $Data|Export-Clixml -Path $DataLogFile -Encoding UTF8
+            ConvertTo-Clixml -InputObject $Data|Set-Content -Path $DataLogFile -Encoding UTF8
+            #$Data|Export-Clixml -Path $DataLogFile -Encoding UTF8
 
             Write-Verbose ('Update-DataLog(): Succesfully exported {0} entries to DataLogFile {1}' -f $Data.Count, $DataLogFile)
         } catch {
@@ -4510,7 +4809,7 @@ if ($null -ne $StorCLIOutput -or $null -ne $Path) {
     } catch {
         Write-Warning "Get-StorCLIStatus.ps1: Script finished with error!"
 
-        $_|Resolve-Error|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $StatusLogFile -Width 300
+        $_|Resolve-Error -Width 300|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $StatusLogFile
         $_|Resolve-Error|ForEach-Object {Write-Warning "Get-StorCLIStatus.ps1: $_"}
 
         # rethrow the statement terminating error, as a script terminating one.
