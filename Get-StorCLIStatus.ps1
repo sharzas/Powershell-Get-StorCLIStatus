@@ -4715,17 +4715,19 @@ function Update-DataLog
 
             try {
                 #$Data = @(Import-Clixml -Path $DataLogFile)
-                $Data = [System.IO.File]::ReadAllText($DataLogFile, [System.Text.Encoding]::UTF8)|ConvertFrom-Clixml
+                $Data = @([System.IO.File]::ReadAllText($DataLogFile, [System.Text.Encoding]::UTF8)|ConvertFrom-Clixml)
     
-                Write-Verbose ('Update-DataLog(): Succesfully imported {0} entries from DataLogFile {1}' -f $Data.Count, $DataLogFile)
+                ('Update-DataLog(): Succesfully imported {0} entries from DataLogFile {1}' -f $Data.Count, $DataLogFile)|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $Script:LogConfiguration.StatusLogFile -PassThru|Write-Verbose
             } catch {
-                Write-Warning ('Update-DataLog(): Failed to import DataLogFile {0}' -f $DataLogFile)
-                Write-Warning ('Update-DataLog(): ')
-                Write-Warning ('Update-DataLog(): The file exists, but the format may be invalid. Cannot handle this file. Please')
-                Write-Warning ('Update-DataLog(): specify another file, or delete this file, to create a new clean one.')
-                Write-Warning ('Update-DataLog(): ')
-                Write-Warning ('Update-DataLog(): Data will not be logged.')
-                Write-Warning ('Update-DataLog(): ')
+                @(('Update-DataLog(): Failed to import DataLogFile {0}' -f $DataLogFile),
+                'Update-DataLog(): ',
+                'Update-DataLog(): The file exists, but the format may be invalid. Cannot handle this file. Please',
+                'Update-DataLog(): specify another file, or delete this file, to create a new clean one.',
+                'Update-DataLog(): ',
+                'Update-DataLog(): Data will not be logged.',
+                'Update-DataLog(): ')|Foeach-Object {
+                    $_|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $Script:LogConfiguration.StatusLogFile -PassThru|Write-Warning
+                }
     
                 $PSCmdlet.ThrowTerminatingError((New-ErrorRecord -baseObject $_ `
                     -exceptionMessage ('Error trying to import DataLogFile "{0}" - 0x{1:X} - {2}' -f $DataLogFile, $_.Exception.HResult, $_.Exception.Message) `
@@ -4757,7 +4759,7 @@ function Update-DataLog
 
                 $Data = @($Data|Where-Object {$_.Basics.'Current System Date/time' -gt $PruneDataLogDate})
 
-                Write-Verbose ('Update-DataLog(): Succesfully pruned {0} entries from DataLogFile' -f ($Entries - $Data.Count))
+                ('Update-DataLog(): Succesfully pruned {0} entries from DataLogFile' -f ($Entries - $Data.Count))|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $Script:LogConfiguration.StatusLogFile -PassThru|Write-Verbose
             } else {
                 # we dont have a date in the datalog.            
                 Write-Warning ('Update-DataLog(): Property .Basics.''Current System Date/time'' not found. Log will not be pruned!')
@@ -4774,7 +4776,7 @@ function Update-DataLog
             ConvertTo-Clixml -InputObject $Data|Set-Content -Path $DataLogFile -Encoding UTF8
             #$Data|Export-Clixml -Path $DataLogFile -Encoding UTF8
 
-            Write-Verbose ('Update-DataLog(): Succesfully exported {0} entries to DataLogFile {1}' -f $Data.Count, $DataLogFile)
+            ('Update-DataLog(): Succesfully exported {0} entries to DataLogFile {1}' -f $Data.Count, $DataLogFile)|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $Script:LogConfiguration.StatusLogFile -PassThru|Write-Verbose
         } catch {
             $PSCmdlet.ThrowTerminatingError((New-ErrorRecord -baseObject $_ `
                 -exceptionMessage ('Error trying to write to DataLogFile "{0}" - 0x{1:X} - {2}' -f $DataLogFile, $_.Exception.HResult, $_.Exception.Message) `
@@ -4800,6 +4802,11 @@ if ($null -ne $StorCLIOutput -or $null -ne $Path) {
 
     $PSBoundParameters.Keys|ForEach-Object {Write-Verbose ('Parameter supplied to Script: {0} - Type = "{1}"' -f $_, $_.Gettype().Fullname)}
 
+    $Script:LogConfiguration = [PSCustomObject]@{
+        StatusLogFile = $StatusLogFile
+        DataLogFile = $DataLogFile
+    }
+
     try {
         Write-Verbose "Get-StorCLIStatus.ps1: Calling Invoke-Main..."
 
@@ -4809,7 +4816,7 @@ if ($null -ne $StorCLIOutput -or $null -ne $Path) {
     } catch {
         Write-Warning "Get-StorCLIStatus.ps1: Script finished with error!"
 
-        $_|Resolve-Error -Width 300|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $StatusLogFile
+        $_|Resolve-Error -Width 300|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $Script:LogConfiguration.StatusLogFile
         $_|Resolve-Error|ForEach-Object {Write-Warning "Get-StorCLIStatus.ps1: $_"}
 
         # rethrow the statement terminating error, as a script terminating one.
