@@ -4725,7 +4725,7 @@ function Update-DataLog
                 'Update-DataLog(): specify another file, or delete this file, to create a new clean one.',
                 'Update-DataLog(): ',
                 'Update-DataLog(): Data will not be logged.',
-                'Update-DataLog(): ')|Foeach-Object {
+                'Update-DataLog(): ')|Foreach-Object {
                     $_|Out-Log -Prefix "[Get-StorCLIStatus.ps1] " -LogFile $Script:LogConfiguration.StatusLogFile -PassThru|Write-Warning
                 }
     
@@ -4750,7 +4750,7 @@ function Update-DataLog
         # Get current entry count.
         $Entries = $Data.Count
 
-        if ($PSBoundParameters.ContainsKey("$PruneDataLogDate")) {
+        if ($PSBoundParameters.ContainsKey("PruneDataLogDate")) {
             # we should prune the datalog, for entries older than the date specified in -PruneDataLogDate
             Write-Verbose ('Update-DataLog(): Pruning DataLog for entries dated earlier than {0}' -f $PruneDataLogDate)
 
