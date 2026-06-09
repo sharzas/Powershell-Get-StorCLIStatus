@@ -1542,7 +1542,26 @@ function ConvertFrom-StorCLIOutput
         }
 
 
+        $BaseReportHTML = @'
+<html>
+    <body>
+        <p>
+            <h1>%statusheadline%</h1>
+            <h2><span style="color: %color%;font-weight: bold;">Status: %status%</span><br></h2>
+            <h2><span style="text-decoration: underline">System Information.</span></h2>
+            <span style="font-weight: bold;">Date: </span><span style="color: %color%;font-weight: bold;">{0}</span><br>
+            <span style="font-weight: bold;">System Hostname: {1}</span><br>
+            <span style="font-weight: bold;">Hostname Origin: {2}</span>
+        </p>
+        <p style="font-family:'Lucida Console',monospace; white-space:pre">
+
+
+
+'@ -f $StateTime, $ReportHostname, $Origin
+
         $ErrorReport = @()
+        $ErrorReportHTML = $BaseReportHTML.Replace("%statusheadline%", "Raid Controller reported one or more errors.") -split "`r`n"
+        <#
         $ErrorReportHTML = @(
             ('<html>'),
             ('    <body>'),
@@ -1555,8 +1574,46 @@ function ConvertFrom-StorCLIOutput
             ('        </p>'),
             ('        <p style="font-family:''Lucida Console'',monospace; white-space:pre">')
         )
+        #>
 
         $Report = @()
+        $ReportHTML = $BaseReportHTML.Replace("%statusheadline%", "Raid Controller full status report.") -split "`r`n"
+
+        $ReportData = @(
+            'Preliminary Checks'
+            '================================================================='
+        )
+
+        $DaysOld = ([Datetime]::Now - $StateTime).Days
+
+        if ($DaysOld -lt 1) {
+            # StorCLI output less than a day old - OK
+            $State = "OK - Less than 1 days old: {0} (Up-to-date)" -f $DaysOld
+            $ReportData += @(
+                'StorCLI State Data: {0}' -f $State
+                '', '', '', ''
+            )
+            $GoodStates += $State
+        } else {
+            $State = "ERROR - More than 1 days old: {0} (Outdated!)" -f $DaysOld
+            $ReportData += @(
+                'StorCLI State Data: {0}' -f $State
+                '', '', '', ''
+            )
+            $BadStates  += $State
+
+            # Add preliminary checks to ErrorReport
+            $ErrorReport += $ReportData
+            $ErrorReportHTML += @($ReportData | Foreach-Object {if ($_ -eq '') {''} else {'<span style="font-weight: bold;">{0}</span>' -f $_}})
+        }
+
+
+        # Add preliminary checks to Report
+        $Report += $ReportData
+        $ReportHTML += @($ReportData | Foreach-Object {if ($_ -eq '') {''} else {'<span style="font-weight: bold;">{0}</span>' -f $_}})
+
+
+        <#
         $ReportHTML = @(
             ('<html>'),
             ('    <body>'),
@@ -1569,6 +1626,7 @@ function ConvertFrom-StorCLIOutput
             ('        </p>'),
             ('        <p style="font-family:''Lucida Console'',monospace; white-space:pre">')
         )
+        #>
 
         if ($null -ne $StorCLI.System) {
             $ErrorReportHTML += @($StorCLI.System|Format-List *|Out-String -Stream -Width 4096|ForEach-Object {$_.Trim()}|Where-Object {$_})
@@ -1667,8 +1725,8 @@ function ConvertFrom-StorCLIOutput
         # build replace pattern to use for the HTML reports. We will build RegExp patterns, which consist of
         # all Bad/Goodstates concatenated into a search group - e.g. (bad1|bad2|bad3) and (good1|good2|good3)
         # - this way its easy for us to replace in only 1 iteration using Powershells -replace operator.
-        $BadStatesPattern = ('({0})' -f ($BadStates -join "|"))
-        $GoodStatesPattern = ('({0})' -f ($GoodStates -join "|"))
+        $BadStatesPattern = ('({0})' -f (@($BadStates | Foreach-Object {[regex]::Escape($_)}) -join "|"))
+        $GoodStatesPattern = ('({0})' -f (@($GoodStates | Foreach-Object {[regex]::Escape($_)}) -join "|"))
 
         Write-Verbose ('Get-StorCLIState(): Bad States RegExp Replace Pattern.: "{0}"' -f $BadStatesPattern)
         Write-Verbose ('Get-StorCLIState(): Good States RegExp Replace Pattern: "{0}"' -f $GoodStatesPattern)
@@ -1696,6 +1754,9 @@ function ConvertFrom-StorCLIOutput
             $StatusObject.Report|Add-Member -MemberType NoteProperty -Name FullHTML -Value $ReportHTML
         }
 
+        $StatusObject|Add-Member -MemberType NoteProperty -Name ReportHostname -Value $ReportHostname
+        $StatusObject|Add-Member -MemberType NoteProperty -Name StateTime -Value $StateTime
+
         if ($ErrorReport.Count -gt 0) {
             # Errors detected, attach error report to status object.
             $ErrorReportHTML += @(
@@ -1712,13 +1773,16 @@ function ConvertFrom-StorCLIOutput
             $StatusObject.Report|Add-Member -MemberType NoteProperty -Name Error -Value $ErrorReport
             $StatusObject.Report|Add-Member -MemberType NoteProperty -Name ErrorHTML -Value $ErrorReportHTML
             $StatusObject|Add-Member -MemberType NoteProperty -Name AreasInErrorState -Value $AreasInErrorState
-            $StatusObject|Add-Member -MemberType NoteProperty -Name ReportHostname -Value $ReportHostname
             $StatusObject|Add-Member -MemberType NoteProperty -Name State -Value "Error"
-            $StatusObject|Add-Member -MemberType NoteProperty -Name StateTime -Value $StateTime
-        } else {
-            $StatusObject|Add-Member -MemberType NoteProperty -Name ReportHostname -Value $ReportHostname
+
+            # Update status value and color
+            $StatusObject.Report.ErrorHTML = $StatusObject.Report.ErrorHTML -replace '%color%','red' -replace '%status%','ERROR'
+            $StatusObject.Report.FullHTML = $StatusObject.Report.FullHTML -replace '%color%','red' -replace '%status%','ERROR'
+        } else {            
             $StatusObject|Add-Member -MemberType NoteProperty -Name State -Value "OK"
-            $StatusObject|Add-Member -MemberType NoteProperty -Name StateTime -Value $StateTime
+
+            # Update status value and color
+            $StatusObject.Report.FullHTML = $StatusObject.Report.FullHTML -replace '%color%','green' -replace '%status%','OK'
         }
 
         if (($Report.Count -eq 0) -and ($ErrorReport.Count -eq 0)) {
